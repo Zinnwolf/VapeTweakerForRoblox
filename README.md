@@ -17,4 +17,5 @@ loadstring(game:HttpGet('https://raw.githubusercontent.com/Zinnwolf/VapeTweakerF
 # Credits
 
 7GrandDadPGN (Vape Owner)
-Vanilla Roblox Vape: 7granddadpgn.github.io
+
+Vanilla Roblox Vape: https://7granddadpgn.github.io
