@@ -1,5 +1,6 @@
 return {
 	files = {
-		'crosshair.lua'
+		'crosshair.lua',
+		'modulemanager.lua'
 	}
 }
