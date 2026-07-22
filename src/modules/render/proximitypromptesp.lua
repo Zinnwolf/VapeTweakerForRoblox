@@ -4,6 +4,7 @@ return function(ctx)
 	local input = game:GetService('UserInputService')
 	local lp = players.LocalPlayer
 	local refs = {}
+	local rayparams = RaycastParams.new()
 	local mod
 	local distance
 	local scale
@@ -11,12 +12,14 @@ return function(ctx)
 	local actiontext
 	local keybind
 	local holdduration
-	local enabledonly
-	local alwaysontop
+	local targets
 	local background
 	local color
 	local folder
 	local elapsed = 0
+
+	rayparams.FilterType = Enum.RaycastFilterType.Exclude
+	rayparams.IgnoreWater = true
 
 	local function escape(text)
 		return tostring(text)
@@ -38,11 +41,16 @@ return function(ctx)
 		return parent:FindFirstAncestorWhichIsA('BasePart')
 	end
 
+	local function partof(obj)
+		if not obj then return nil end
+		if obj:IsA('Attachment') then return obj.Parent end
+		if obj:IsA('BasePart') then return obj end
+	end
+
 	local function position(obj)
 		if not obj then return nil end
 		if obj:IsA('Attachment') then return obj.WorldPosition end
 		if obj:IsA('BasePart') then return obj.Position end
-		return nil
 	end
 
 	local function key(prompt)
@@ -167,11 +175,44 @@ return function(ctx)
 		refs[prompt] = data
 	end
 
+	local function targetallowed(prompt)
+		local model = prompt:FindFirstAncestorOfClass('Model')
+		if not model then return true end
+		if players:GetPlayerFromCharacter(model) then
+			return targets.Players.Enabled
+		end
+		if model:FindFirstChildOfClass('Humanoid') then
+			return targets.NPCs.Enabled
+		end
+		return true
+	end
+
+	local function invisible(prompt, target)
+		if not prompt.Enabled then return true end
+		local part = partof(target)
+		if not part then return false end
+		return math.max(part.Transparency, part.LocalTransparencyModifier) >= 1
+	end
+
+	local function behindwall(prompt, target, origin, pos, char)
+		local offset = pos - origin
+		if offset.Magnitude <= 0.01 then return false end
+		rayparams.FilterDescendantsInstances = char and {char} or {}
+		local hit = workspace:Raycast(origin, offset, rayparams)
+		if not hit then return false end
+
+		local part = partof(target)
+		if part and hit.Instance == part then return false end
+		local model = prompt:FindFirstAncestorOfClass('Model')
+		if model and hit.Instance:IsDescendantOf(model) then return false end
+		return true
+	end
+
 	local function update()
 		local char = lp.Character
 		local root = char and char:FindFirstChild('HumanoidRootPart')
 		local cam = workspace.CurrentCamera
-		local origin = root and root.Position or cam and cam.CFrame.Position
+		local origin = cam and cam.CFrame.Position or root and root.Position
 		if not origin then return end
 
 		local tint = Color3.fromHSV(color.Hue, color.Sat, color.Value)
@@ -194,11 +235,16 @@ return function(ctx)
 					end
 
 					local studs = (pos - origin).Magnitude
-					local shown = studs <= max and (not enabledonly.Enabled or prompt.Enabled)
+					local shown = studs <= max and targetallowed(prompt)
+					if shown and targets.Invisible.Enabled then
+						shown = not invisible(prompt, target)
+					end
+					if shown and targets.Walls.Enabled then
+						shown = not behindwall(prompt, target, origin, pos, char)
+					end
 					data.gui.Enabled = shown
 
 					if shown then
-						data.gui.AlwaysOnTop = alwaysontop.Enabled
 						data.gui.Size = UDim2.fromOffset(210 * size, 48 * size)
 						data.frame.BackgroundTransparency = background.Enabled and 0.35 or 1
 						data.label.TextSize = math.floor(14 * size + 0.5)
@@ -256,6 +302,15 @@ return function(ctx)
 		end
 	})
 
+	targets = mod:CreateTargets({
+		Players = true,
+		NPCs = true,
+		Invisible = true,
+		Function = function()
+			if mod.Enabled then update() end
+		end
+	})
+
 	distance = mod:CreateSlider({
 		Name = 'Distance',
 		Min = 10,
@@ -306,22 +361,6 @@ return function(ctx)
 
 	holdduration = mod:CreateToggle({
 		Name = 'Hold Duration',
-		Function = function()
-			if mod.Enabled then update() end
-		end
-	})
-
-	enabledonly = mod:CreateToggle({
-		Name = 'Enabled Only',
-		Default = true,
-		Function = function()
-			if mod.Enabled then update() end
-		end
-	})
-
-	alwaysontop = mod:CreateToggle({
-		Name = 'Through Walls',
-		Default = true,
 		Function = function()
 			if mod.Enabled then update() end
 		end
