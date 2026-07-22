@@ -1,3 +1,6 @@
 return {
-	categories = {'render'}
+	categories = {
+		'render',
+		'world'
+	}
 }
