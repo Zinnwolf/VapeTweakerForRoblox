@@ -295,7 +295,8 @@ return function(ctx)
 		local box = Instance.new('TextButton')
 		box.Name = 'HiddenBox'
 		box.Size = UDim2.fromOffset(12, 12)
-		box.Position = UDim2.fromOffset(22, 14)
+		box.AnchorPoint = Vector2.new(0.5, 0.5)
+		box.Position = UDim2.new(0, 21.5, 0.5, 0)
 		box.BackgroundColor3 = Color3.fromRGB(52, 52, 58)
 		box.BackgroundTransparency = 0
 		box.BorderSizePixel = 0
