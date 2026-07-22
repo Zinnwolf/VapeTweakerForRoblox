@@ -277,12 +277,27 @@ return function(ctx)
 		return value
 	end
 
+	local function makehiddenrail(parent, zindex)
+		local rail = Instance.new('Frame')
+		rail.Name = 'VTHiddenRail'
+		rail.Size = UDim2.new(0, 43, 1, 0)
+		rail.Position = UDim2.fromOffset(0, 0)
+		rail.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+		rail.BackgroundTransparency = 0
+		rail.BorderSizePixel = 0
+		rail.Visible = false
+		rail.ZIndex = zindex or parent.ZIndex
+		rail.Parent = parent
+		return rail
+	end
+
 	local function makehiddenbox(parent, zindex)
 		local box = Instance.new('TextButton')
 		box.Name = 'HiddenBox'
-		box.Size = UDim2.fromOffset(14, 14)
-		box.Position = UDim2.fromOffset(21, 13)
-		box.BackgroundTransparency = 1
+		box.Size = UDim2.fromOffset(12, 12)
+		box.Position = UDim2.fromOffset(22, 14)
+		box.BackgroundColor3 = Color3.fromRGB(52, 52, 58)
+		box.BackgroundTransparency = 0
 		box.BorderSizePixel = 0
 		box.AutoButtonColor = false
 		box.Visible = false
@@ -290,14 +305,15 @@ return function(ctx)
 		box.ZIndex = zindex or parent.ZIndex
 		box.Parent = parent
 
-		local outline = Instance.new('UIStroke')
-		outline.Name = 'Outline'
-		outline.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		outline.LineJoinMode = Enum.LineJoinMode.Miter
-		outline.Thickness = 1
-		outline.Color = Color3.fromRGB(72, 72, 80)
-		outline.Transparency = 0
-		outline.Parent = box
+		local gap = Instance.new('Frame')
+		gap.Name = 'Outline'
+		gap.Size = UDim2.new(1, -2, 1, -2)
+		gap.Position = UDim2.fromOffset(1, 1)
+		gap.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+		gap.BackgroundTransparency = 0
+		gap.BorderSizePixel = 0
+		gap.ZIndex = box.ZIndex
+		gap.Parent = box
 
 		local fill = Instance.new('Frame')
 		fill.Name = 'Fill'
@@ -305,18 +321,18 @@ return function(ctx)
 		fill.Position = UDim2.fromOffset(2, 2)
 		fill.BackgroundTransparency = 1
 		fill.BorderSizePixel = 0
-		fill.ZIndex = box.ZIndex
+		fill.ZIndex = box.ZIndex + 1
 		fill.Parent = box
-		return box, outline, fill
+		return box, gap, fill
 	end
 
-	local function updatehiddenbox(box, outline, fill, hidden, mod)
-		if not isinst(box) or not isinst(outline) or not isinst(fill) then return end
-		box.BackgroundTransparency = 1
-		outline.Enabled = true
+	local function updatehiddenbox(box, gap, fill, hidden, mod)
+		if not isinst(box) or not isinst(gap) or not isinst(fill) then return end
 		local color = hidden and Color3.fromRGB(52, 52, 58) or accent(mod)
-		outline.Color = color
-		outline.Transparency = 0
+		box.BackgroundColor3 = color
+		box.BackgroundTransparency = 0
+		gap.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+		gap.BackgroundTransparency = 0
 		fill.BackgroundColor3 = color
 		fill.BackgroundTransparency = hidden and 1 or 0
 	end
@@ -430,7 +446,7 @@ return function(ctx)
 		if not isinst(parent) then return end
 		for _, name in ipairs({
 			'VTFavorite', 'VTHideShield', 'VTHideGuard', 'VTEditHidden',
-			'VTDoneHidden', 'VTHiddenCount', 'Favorite', 'HiddenBox',
+			'VTDoneHidden', 'VTHiddenCount', 'VTHiddenRail', 'Favorite', 'HiddenBox',
 			'EditHiddenModules', 'DoneHiddenModules', 'HiddenCount'
 		}) do
 			local child = parent:FindFirstChild(name)
@@ -594,6 +610,7 @@ return function(ctx)
 		guard.ZIndex = row.ZIndex + 30
 		guard.Parent = row
 
+		local rail = makehiddenrail(row, row.ZIndex + 29)
 		local hiddenbox, outline, fill = makehiddenbox(row, row.ZIndex + 31)
 		local dots = row:FindFirstChild('Dots')
 		local bind = row:FindFirstChild('Bind')
@@ -603,6 +620,7 @@ return function(ctx)
 			row = row,
 			star = star,
 			guard = guard,
+			rail = rail,
 			hiddenbox = hiddenbox,
 			outline = outline,
 			fill = fill,
@@ -725,6 +743,7 @@ return function(ctx)
 		end
 		data.row.Visible = editing or not hidden
 		data.guard.Visible = editing
+		data.rail.Visible = editing
 		data.hiddenbox.Visible = editing
 		data.row.Text = editing and data.edittext or data.normal
 		if isinst(data.dots) then data.dots.Visible = not editing end
@@ -786,7 +805,8 @@ return function(ctx)
 		gradient.Enabled = false
 		gradient.Parent = row
 
-		local hiddenbox, outline, fill = makehiddenbox(row)
+		local rail = makehiddenrail(row, row.ZIndex + 1)
+		local hiddenbox, outline, fill = makehiddenbox(row, row.ZIndex + 2)
 
 		local bind = Instance.new('TextButton')
 		bind.Name = 'BindPreview'
@@ -869,6 +889,7 @@ return function(ctx)
 			moddata = source,
 			row = row,
 			gradient = gradient,
+			rail = rail,
 			hiddenbox = hiddenbox,
 			outline = outline,
 			fill = fill,
@@ -965,6 +986,7 @@ return function(ctx)
 		data.row.Visible = state.editing or not hidden
 		data.row.Text = state.editing and ('    '..mod.Name:gsub(' ', ''))
 			or ('            '..mod.Name:gsub(' ', ''))
+		data.rail.Visible = state.editing
 		data.hiddenbox.Visible = state.editing
 		data.dotsbutton.Visible = not state.editing
 		updatehiddenbox(data.hiddenbox, data.outline, data.fill, hidden, mod)
@@ -1220,7 +1242,7 @@ return function(ctx)
 				data.row.Visible = true
 				data.row.Text = data.normal
 			end
-			for _, obj in ipairs({data.star, data.guard, data.hiddenbox}) do
+			for _, obj in ipairs({data.star, data.guard, data.rail, data.hiddenbox}) do
 				if isinst(obj) then obj:Destroy() end
 			end
 			if isinst(data.dots) then data.dots.Visible = true end
