@@ -265,7 +265,7 @@ return function(ctx)
 
 	mod = ctx:module('render', {
 		name = 'ProximityPromptESP',
-		tooltip = 'Displays nearby ProximityPrompts through a configurable overlay.',
+		tooltip = 'Extra Sensory Perception for proximity prompts',
 		func = function(on)
 			if on then
 				clear()
