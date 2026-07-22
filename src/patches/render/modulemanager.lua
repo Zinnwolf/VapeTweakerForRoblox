@@ -290,19 +290,19 @@ return function(ctx)
 		box.ZIndex = zindex or parent.ZIndex
 		box.Parent = parent
 
-		local outline = Instance.new('Frame')
+		local outline = Instance.new('UIStroke')
 		outline.Name = 'Outline'
-		outline.Size = UDim2.fromScale(1, 1)
-		outline.BackgroundTransparency = 1
-		outline.BorderSizePixel = 1
-		outline.BorderColor3 = Color3.fromRGB(62, 62, 70)
-		outline.ZIndex = box.ZIndex
+		outline.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		outline.LineJoinMode = Enum.LineJoinMode.Miter
+		outline.Thickness = 1
+		outline.Color = Color3.fromRGB(72, 72, 80)
+		outline.Transparency = 0
 		outline.Parent = box
 
 		local fill = Instance.new('Frame')
 		fill.Name = 'Fill'
-		fill.Size = UDim2.new(1, -2, 1, -2)
-		fill.Position = UDim2.fromOffset(1, 1)
+		fill.Size = UDim2.new(1, -4, 1, -4)
+		fill.Position = UDim2.fromOffset(2, 2)
 		fill.BackgroundTransparency = 1
 		fill.BorderSizePixel = 0
 		fill.ZIndex = box.ZIndex
@@ -311,20 +311,14 @@ return function(ctx)
 	end
 
 	local function updatehiddenbox(box, outline, fill, hidden, mod)
-		if not isinst(box) then return end
+		if not isinst(box) or not isinst(outline) or not isinst(fill) then return end
 		box.BackgroundTransparency = 1
-		if hidden then
-			outline.BackgroundTransparency = 1
-			outline.BorderSizePixel = 1
-			outline.BorderColor3 = Color3.fromRGB(62, 62, 70)
-			fill.BackgroundTransparency = 1
-		else
-			outline.BackgroundTransparency = 1
-			outline.BorderSizePixel = 1
-			outline.BorderColor3 = Color3.fromRGB(235, 235, 240)
-			fill.BackgroundColor3 = accent(mod)
-			fill.BackgroundTransparency = 0
-		end
+		outline.Enabled = true
+		local color = hidden and Color3.fromRGB(52, 52, 58) or accent(mod)
+		outline.Color = color
+		outline.Transparency = 0
+		fill.BackgroundColor3 = color
+		fill.BackgroundTransparency = hidden and 1 or 0
 	end
 
 	local refreshfavorites

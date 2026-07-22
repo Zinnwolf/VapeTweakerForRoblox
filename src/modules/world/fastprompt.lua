@@ -21,7 +21,7 @@ return function(ctx)
 
 	mod = ctx:module('world', {
 		name = 'FastPrompt',
-		tooltip = 'Modify ProximityPrompt timer',
+		tooltip = 'Allows you to interact with prompts quicker.',
 		func = function(on)
 			if on then
 				mod:Clean(prompts.PromptButtonHoldBegan:Connect(function(prompt, player)
