@@ -216,9 +216,56 @@ return function(ctx)
 		end
 	end
 
-	local function configpath(dir)
+	local function placeid()
+		return tostring(math.floor(tonumber(game.PlaceId) or 0))
+	end
+
+	local function configpath(dir, id)
+		dir = dir or ctx.profile and ctx.profile.dir or 'default'
+		return 'configs/profiles/'..dir..'/'..tostring(id or placeid())..'.lua'
+	end
+
+	local function legacyconfigpath(dir)
 		dir = dir or ctx.profile and ctx.profile.dir or 'default'
 		return 'configs/profiles/'..dir..'/gui.json'
+	end
+
+	local function migrationpath(dir)
+		dir = dir or ctx.profile and ctx.profile.dir or 'default'
+		return 'configs/profiles/'..dir..'/placeconfigs.migrated'
+	end
+
+	local function luastr(value)
+		return string.format('%q', tostring(value))
+	end
+
+	local function lualist(values)
+		local out = {}
+		for index, value in ipairs(values or {}) do
+			out[index] = luastr(value)
+		end
+		return '{'..table.concat(out, ', ')..'}'
+	end
+
+	local function number(value, fallback)
+		value = tonumber(value)
+		if not value or value ~= value or value == math.huge or value == -math.huge then
+			return fallback or 0
+		end
+		return value
+	end
+
+	local function readconfig(path)
+		local raw = ctx.store:read(path)
+		if not raw then return nil end
+		local compiled, err = loadstring(raw)
+		if not compiled then
+			ctx.log:add('config_parse', path, err)
+			return nil
+		end
+		local ok, data = pcall(compiled)
+		if ok and type(data) == 'table' then return data end
+		ctx.log:add('config_parse', path, ok and 'config did not return a table' or data)
 	end
 
 	local function syncapi()
@@ -234,12 +281,15 @@ return function(ctx)
 	local function favoritewindow()
 		local saved = state.favoritewindow or {Enabled = false}
 		if fav and isinst(fav.Object) then
+			local position = fav.Object.Position
 			saved = {
 				Enabled = fav.Button and fav.Button.Enabled == true or false,
 				Expanded = fav.Expanded == true,
 				Position = {
-					X = fav.Object.Position.X.Offset,
-					Y = fav.Object.Position.Y.Offset
+					XScale = position.X.Scale,
+					X = position.X.Offset,
+					YScale = position.Y.Scale,
+					Y = position.Y.Offset
 				}
 			}
 		end
@@ -247,16 +297,34 @@ return function(ctx)
 		return saved
 	end
 
+	local function configsource()
+		local window = favoritewindow()
+		local position = window.Position or window.position or {}
+		return table.concat({
+			'return {',
+			'\tversion = 4,',
+			'\tplaceid = '..placeid()..',',
+			'\tfavorites = '..lualist(tolist(state.favorites))..',',
+			'\thidden = '..lualist(tolist(state.hidden))..',',
+			'\ttabs = {',
+			'\t\tFavorites = {',
+			'\t\t\tEnabled = '..tostring(window.Enabled == true)..',',
+			'\t\t\tExpanded = '..tostring(window.Expanded == true)..',',
+			'\t\t\tPosition = {',
+			'\t\t\t\tXScale = '..tostring(number(position.XScale or position.xscale, 0))..',',
+			'\t\t\t\tX = '..tostring(number(position.X or position.XOffset or position.x or position.xoffset, 0))..',',
+			'\t\t\t\tYScale = '..tostring(number(position.YScale or position.yscale, 0))..',',
+			'\t\t\t\tY = '..tostring(number(position.Y or position.YOffset or position.y or position.yoffset, 0)),
+			'\t\t\t}',
+			'\t\t}',
+			'\t}',
+			'}'
+		}, '\n')
+	end
+
 	local function save(dir)
 		if not alive then return false end
-		local path = configpath(dir)
-		local raw = ctx.store:encode({
-			version = 3,
-			favorites = tolist(state.favorites),
-			hidden = tolist(state.hidden),
-			favoritewindow = favoritewindow()
-		}, path)
-		return raw and ctx.store:write(path, raw) or false
+		return ctx.store:write(configpath(dir), configsource())
 	end
 
 	local function queuesave()
@@ -268,22 +336,40 @@ return function(ctx)
 	end
 
 	local function load()
-		local data = ctx.store:json(configpath())
+		profile = ctx.profile and ctx.profile.dir or 'default'
+		local file = configpath(profile)
+		local data = readconfig(file)
+		local created = type(data) ~= 'table'
+		if data and tonumber(data.placeid) ~= tonumber(game.PlaceId) then
+			data = nil
+			created = true
+		end
+
+		if not data and not ctx.store:has(migrationpath(profile)) then
+			local legacy = ctx.store:json(legacyconfigpath(profile))
+			if type(legacy) == 'table' then data = legacy end
+			ctx.store:write(migrationpath(profile), placeid())
+		end
+
 		state.favorites = tomap(data and data.favorites)
 		state.hidden = tomap(data and data.hidden)
-		local window = data and data.favoritewindow
+		local tabs = data and data.tabs
+		local window = type(tabs) == 'table' and (tabs.Favorites or tabs.favorites)
+			or data and data.favoritewindow
 		local position = type(window) == 'table' and (window.Position or window.position)
 		state.favoritewindow = {
 			Enabled = type(window) == 'table' and (window.Enabled == true or window.enabled == true) or false,
 			Expanded = type(window) == 'table' and (window.Expanded == true or window.expanded == true) or false,
 			Position = type(position) == 'table' and {
-				X = tonumber(position.X or position.x),
-				Y = tonumber(position.Y or position.y)
+				XScale = number(position.XScale or position.xscale, 0),
+				X = number(position.X or position.XOffset or position.x or position.xoffset, 0),
+				YScale = number(position.YScale or position.yscale, 0),
+				Y = number(position.Y or position.YOffset or position.y or position.yoffset, 0)
 			} or nil
 		}
 		state.editing = false
-		profile = ctx.profile and ctx.profile.dir or 'default'
 		syncapi()
+		if created or not ctx.store:has(file) then save(profile) end
 	end
 
 	local function accent(mod)
@@ -1132,9 +1218,13 @@ return function(ctx)
 		local saved = state.favoritewindow or {Enabled = false}
 		restoringwindow = true
 		local position = saved.Position or saved.position
-		local x = type(position) == 'table' and tonumber(position.X or position.x)
-		local y = type(position) == 'table' and tonumber(position.Y or position.y)
-		if x and y then fav.Object.Position = UDim2.fromOffset(x, y) end
+		local xscale = type(position) == 'table' and tonumber(position.XScale or position.xscale) or 0
+		local x = type(position) == 'table'
+			and tonumber(position.X or position.XOffset or position.x or position.xoffset)
+		local yscale = type(position) == 'table' and tonumber(position.YScale or position.yscale) or 0
+		local y = type(position) == 'table'
+			and tonumber(position.Y or position.YOffset or position.y or position.yoffset)
+		if x and y then fav.Object.Position = UDim2.new(xscale or 0, x, yscale or 0, y) end
 		local expanded = saved.Expanded == true or saved.expanded == true
 		if type(fav.Expand) == 'function' and fav.Expanded ~= expanded then fav:Expand() end
 		local enabled = saved.Enabled == true or saved.enabled == true
