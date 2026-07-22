@@ -3,9 +3,10 @@
 
 <img width="1923" height="817" alt="image" src="https://github.com/user-attachments/assets/f975a3c5-7f78-4435-a1be-ec7ed4b23a35" />
 
-Funny littol project meant to recreate vapetweaker but on roblox
+# What is this?
+-Little project to fix things I find annoying in vape.
 
-Ill try my best to make this a high quality custom vape
+-I will try my best to keep this as a high quality custom.
 
 # Loader
 
