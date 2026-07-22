@@ -9,12 +9,18 @@ return function(ctx)
 
 	local tweenservice = game:GetService('TweenService')
 	local runservice = game:GetService('RunService')
+	local players = game:GetService('Players')
 	local textservice = game:GetService('TextService')
 	local inputservice = game:GetService('UserInputService')
 	local alive = true
 	local ticket = 0
 	local profile
-	local state = {favorites = {}, hidden = {}, editing = false}
+	local state = {
+		favorites = {},
+		hidden = {},
+		editing = false,
+		favoritewindow = {Enabled = false}
+	}
 	local decorated = {}
 	local headers = {}
 	local rows = {}
@@ -24,6 +30,7 @@ return function(ctx)
 	local favchildren
 	local favbutton
 	local openfavorite
+	local restoringwindow = false
 	local palette
 	local bounds = Instance.new('GetTextBoundsParams')
 	bounds.Width = math.huge
@@ -224,13 +231,30 @@ return function(ctx)
 		vape.Hidden.Editing = state.editing
 	end
 
+	local function favoritewindow()
+		local saved = state.favoritewindow or {Enabled = false}
+		if fav and isinst(fav.Object) then
+			saved = {
+				Enabled = fav.Button and fav.Button.Enabled == true or false,
+				Expanded = fav.Expanded == true,
+				Position = {
+					X = fav.Object.Position.X.Offset,
+					Y = fav.Object.Position.Y.Offset
+				}
+			}
+		end
+		state.favoritewindow = saved
+		return saved
+	end
+
 	local function save(dir)
 		if not alive then return false end
 		local path = configpath(dir)
 		local raw = ctx.store:encode({
-			version = 2,
+			version = 3,
 			favorites = tolist(state.favorites),
-			hidden = tolist(state.hidden)
+			hidden = tolist(state.hidden),
+			favoritewindow = favoritewindow()
 		}, path)
 		return raw and ctx.store:write(path, raw) or false
 	end
@@ -247,6 +271,16 @@ return function(ctx)
 		local data = ctx.store:json(configpath())
 		state.favorites = tomap(data and data.favorites)
 		state.hidden = tomap(data and data.hidden)
+		local window = data and data.favoritewindow
+		local position = type(window) == 'table' and (window.Position or window.position)
+		state.favoritewindow = {
+			Enabled = type(window) == 'table' and (window.Enabled == true or window.enabled == true) or false,
+			Expanded = type(window) == 'table' and (window.Expanded == true or window.expanded == true) or false,
+			Position = type(position) == 'table' and {
+				X = tonumber(position.X or position.x),
+				Y = tonumber(position.Y or position.y)
+			} or nil
+		}
 		state.editing = false
 		profile = ctx.profile and ctx.profile.dir or 'default'
 		syncapi()
@@ -1093,6 +1127,23 @@ return function(ctx)
 		starvisual(button, fav and fav.Button and fav.Button.Enabled, false)
 	end
 
+	local function applyfavoritewindow()
+		if not fav or not isinst(fav.Object) or not fav.Button then return end
+		local saved = state.favoritewindow or {Enabled = false}
+		restoringwindow = true
+		local position = saved.Position or saved.position
+		local x = type(position) == 'table' and tonumber(position.X or position.x)
+		local y = type(position) == 'table' and tonumber(position.Y or position.y)
+		if x and y then fav.Object.Position = UDim2.fromOffset(x, y) end
+		local expanded = saved.Expanded == true or saved.expanded == true
+		if type(fav.Expand) == 'function' and fav.Expanded ~= expanded then fav:Expand() end
+		local enabled = saved.Enabled == true or saved.enabled == true
+		if fav.Button.Enabled ~= enabled then fav.Button:Toggle() end
+		restoringwindow = false
+		favoritewindow()
+		if favbutton then starvisual(favbutton, fav.Button.Enabled, false) end
+	end
+
 	local function createfavorites()
 		fav = vape.Categories.Favorites
 		if type(fav) ~= 'table' or not isinst(fav.Object) then
@@ -1133,9 +1184,18 @@ return function(ctx)
 					if divider then divider.Visible = false end
 				end
 				if favbutton then starvisual(favbutton, buttonapi.Enabled, false) end
+				if not restoringwindow then
+					favoritewindow()
+					queuesave()
+				end
 			end
 		}
 		fav.Object.Visible = false
+		ctx:clean(fav.Object:GetPropertyChangedSignal('Position'):Connect(function()
+			if restoringwindow then return end
+			favoritewindow()
+			queuesave()
+		end))
 		return true
 	end
 
@@ -1153,6 +1213,7 @@ return function(ctx)
 	if createfavorites() == false then return end
 	addheader('Favorites', fav)
 	addfavoritesbutton()
+	applyfavoritewindow()
 
 	vape.Favorites = {List = {}, Rows = rows, StarButton = favbutton}
 	vape.Hidden = {List = {}, Editing = false}
@@ -1210,6 +1271,15 @@ return function(ctx)
 	end
 
 	scan()
+	local lp = players.LocalPlayer
+	if lp and lp.OnTeleport then
+		ctx:clean(lp.OnTeleport:Connect(function(teleportstate)
+			if teleportstate == Enum.TeleportState.Started
+				or teleportstate == Enum.TeleportState.InProgress then
+				save(profile)
+			end
+		end))
+	end
 	local scanclock = 0
 	local syncclock = 0
 	ctx:clean(runservice.Heartbeat:Connect(function(dt)
@@ -1221,6 +1291,7 @@ return function(ctx)
 			closefavoritechildren()
 			load()
 			scan()
+			applyfavoritewindow()
 		end
 		if scanclock >= 0.5 then
 			scanclock = 0
