@@ -1,20 +1,14 @@
 return function(ctx)
+	local http = game:GetService('HttpService')
 	local seen = {}
 	local excluded = {
 		modules = {},
 		patches = {}
 	}
 	local removals = {}
-	local planned = {}
+	local tree
 
-	local function join(a, b)
-		if type(b) ~= 'string' or b == '' then return a end
-		b = b:gsub('\\', '/'):gsub('^/+', ''):gsub('/+$', '')
-		if b:sub(1, 4) == 'src/' then return b end
-		return a..'/'..b
-	end
-
-	local function cleanpath(path)
+	local function clean(path)
 		return tostring(path or '')
 			:gsub('\\', '/')
 			:gsub('/+', '/')
@@ -23,35 +17,28 @@ return function(ctx)
 			:lower()
 	end
 
-	local function fail(kind, path, msg, fatal)
-		ctx.log:add(kind, path, msg, fatal)
-		if fatal then error(msg, 0) end
+	local function fail(kind, path, message, fatal)
+		ctx.log:add(kind, path, message, fatal)
+		if fatal then error(message, 0) end
 	end
 
-	local function traceback(msg)
+	local function trace(message)
 		if ctx.cfg.debug and debug and type(debug.traceback) == 'function' then
-			return debug.traceback(tostring(msg), 2)
+			return debug.traceback(tostring(message), 2)
 		end
-		return tostring(msg)
+		return tostring(message)
 	end
 
-	local function addexclude(kind, value, prefix)
+	local function addexclude(kind, value)
 		if type(value) == 'string' then
-			local path = cleanpath((prefix and prefix..'/' or '')..value)
-			if path ~= '' then excluded[kind][path] = true end
+			value = clean(value)
+			if value ~= '' then excluded[kind][value] = true end
 			return
 		end
 		if type(value) ~= 'table' then return end
 		for key, item in pairs(value) do
-			if type(key) == 'number' then
-				addexclude(kind, item, prefix)
-			elseif item == true then
-				addexclude(kind, key, prefix)
-			elseif type(item) == 'table' then
-				addexclude(kind, item, (prefix and prefix..'/' or '')..tostring(key))
-			elseif type(item) == 'string' then
-				addexclude(kind, item, (prefix and prefix..'/' or '')..tostring(key))
-			end
+			local path = type(key) == 'number' and item or item == true and key or nil
+			if type(path) == 'string' then addexclude(kind, path) end
 		end
 	end
 
@@ -67,22 +54,21 @@ return function(ctx)
 		end
 	end
 
-	local function collect(data)
-		if type(data) ~= 'table' then return end
-		local block = data.exclude or data.excludes
+	local function collect(manifest)
+		if type(manifest) ~= 'table' then return end
+		local block = manifest.exclude or manifest.excludes
 		if type(block) == 'table' then
 			addexclude('modules', block.modules)
 			addexclude('patches', block.patches)
 		end
-		addremovals(data.remove or data.removes)
+		addremovals(manifest.remove or manifest.removes)
 	end
 
-	local function isexcluded(path, kind, scope)
-		if scope ~= 'universal' or not excluded[kind] then return false end
-		local full = cleanpath(path)
+	local function isexcluded(path, kind)
+		local rel = clean(path)
 		local root = kind == 'modules' and 'src/modules/' or 'src/patches/'
-		local rel = full:sub(1, #root) == root and full:sub(#root + 1) or full
-		if excluded[kind][full] or excluded[kind][rel] then return true end
+		if rel:sub(1, #root) == root then rel = rel:sub(#root + 1) end
+		if excluded[kind][rel] or excluded[kind][clean(path)] then return true end
 		for pattern in pairs(excluded[kind]) do
 			if pattern:sub(-2) == '/*' then
 				local prefix = pattern:sub(1, -2)
@@ -95,9 +81,10 @@ return function(ctx)
 	end
 
 	local function run(path, meta)
+		path = clean(path)
 		if seen[path] then return false end
+		if meta.scope == 'universal' and isexcluded(path, meta.kind) then return false end
 		seen[path] = true
-		if isexcluded(path, meta.kind, meta.scope) then return false end
 
 		local mark = ctx:_mark()
 		local previous = ctx.loading
@@ -109,275 +96,274 @@ return function(ctx)
 			path = path,
 			required = meta.required == true
 		}
-		local ok, msg = xpcall(function()
+
+		local ok, message = xpcall(function()
 			local init = ctx.loader:run(path)
-			if type(init) ~= 'function' then error(path..' must return a function', 0) end
+			if type(init) ~= 'function' then
+				error(path..' must return a function', 0)
+			end
 			init(ctx)
-		end, traceback)
+		end, trace)
+
 		ctx.loading = previous
 		if ok then return true end
-		if not ctx:_rollback(mark) then error('incomplete rollback for '..path, 0) end
-		fail(meta.kind, path, msg, ctx.cfg.strict or meta.required == true)
+		if not ctx:_rollback(mark) then
+			error('incomplete rollback for '..path, 0)
+		end
+		fail(meta.kind, path, message, ctx.cfg.strict or meta.required == true)
 		return false
 	end
 
-	local function categories(man, path)
-		if man.categories == nil then return table.clone(ctx.cats.order) end
-		if type(man.categories) ~= 'table' then error(path..' categories must be a table', 0) end
-		local out = {}
+	local function categories(manifest, path)
+		if manifest.categories == nil then return table.clone(ctx.cats.order) end
+		if type(manifest.categories) ~= 'table' then
+			error(path..' categories must be a table', 0)
+		end
+
+		local output = {}
 		local added = {}
-		for key, val in pairs(man.categories) do
-			local cat = type(key) == 'number' and val or val and key or nil
-			if cat then
-				cat = tostring(cat):lower()
-				if not ctx.cats.names[cat] then error(path..' has unsupported category '..cat, 0) end
-				if not added[cat] then
-					added[cat] = true
-					out[#out + 1] = cat
+		for key, value in pairs(manifest.categories) do
+			local category = type(key) == 'number' and value or value and key or nil
+			if category then
+				category = tostring(category):lower()
+				if not ctx.cats.names[category] then
+					error(path..' has unsupported category '..category, 0)
+				end
+				if not added[category] then
+					added[category] = true
+					output[#output + 1] = category
 				end
 			end
 		end
-		table.sort(out, function(a, b)
+
+		table.sort(output, function(a, b)
 			return table.find(ctx.cats.order, a) < table.find(ctx.cats.order, b)
 		end)
-		return out
+		return output
 	end
 
-	local function catfiles(man, kind, path)
-		local files = man.files or man[kind] or man
-		if type(files) ~= 'table' then error(path..' must return a file list', 0) end
-		return files
-	end
-
-	local function loadcat(root, cat, meta)
-		local path = root..'/'..cat..'/manifest.lua'
-		if isexcluded(path, meta.kind, meta.scope) then return 0 end
-		local ok, man, state = ctx.loader:try(path)
+	local function loadcategory(root, category, kind, layer, scope)
+		local manifestpath = root..'/'..category..'/manifest.lua'
+		local ok, manifest, state = ctx.loader:try(manifestpath)
 		if not ok then
-			if state ~= 'missing' then fail(meta.kind, path, man, ctx.cfg.strict) end
+			if state ~= 'missing' then fail(kind, manifestpath, manifest, ctx.cfg.strict) end
 			return 0
 		end
-		if type(man) ~= 'table' then
-			fail(meta.kind, path, path..' must return a table', ctx.cfg.strict)
+		if type(manifest) ~= 'table' then
+			fail(kind, manifestpath, manifestpath..' must return a table', ctx.cfg.strict)
 			return 0
 		end
-		if man.disabled == true or man.nativeonly == true and not ctx.target.native then return 0 end
 
 		local count = 0
-		if man.init then
-			if run(join(root..'/'..cat, man.init), {
-				layer = meta.layer,
-				scope = meta.scope,
-				category = cat,
-				kind = meta.kind,
-				required = true
-			}) then count += 1 end
-		end
-
-		for _, entry in ipairs(catfiles(man, meta.kind, path)) do
-			local rel = type(entry) == 'string' and entry
+		for _, entry in ipairs(manifest.files or manifest[kind] or manifest) do
+			local file = type(entry) == 'string' and entry
 				or type(entry) == 'table' and (entry.path or entry.file)
-			local enabled = type(entry) ~= 'table' or entry.enabled ~= false
-			if rel and enabled and run(join(root..'/'..cat, rel), {
-				layer = meta.layer,
-				scope = meta.scope,
-				category = cat,
-				kind = meta.kind,
-				required = type(entry) == 'table' and entry.required == true
-			}) then
-				count += 1
+			if file and (type(entry) ~= 'table' or entry.enabled ~= false) then
+				if run(root..'/'..category..'/'..file, {
+					layer = layer,
+					scope = scope,
+					category = category,
+					kind = kind,
+					required = type(entry) == 'table' and entry.required == true
+				}) then
+					count += 1
+				end
 			end
 		end
 		return count
 	end
 
-	function ctx:loadroot(root, kind, layer, scope, required, supplied)
-		local path = root..'/manifest.lua'
-		local man = supplied
-		if man == nil then
-			local ok, value, state = self.loader:try(path)
-			if not ok then
-				if required or state ~= 'missing' then
-					fail('layer', path, value or 'missing manifest', required or self.cfg.strict)
-				end
-				return false
+	local function loadmanifestroot(root, kind, layer, scope, required)
+		local manifestpath = root..'/manifest.lua'
+		local ok, manifest, state = ctx.loader:try(manifestpath)
+		if not ok then
+			if required or state ~= 'missing' then
+				fail('layer', manifestpath, manifest or 'missing manifest', required or ctx.cfg.strict)
 			end
-			man = value
+			return 0
 		end
-		if type(man) ~= 'table' then
-			fail('layer', path, path..' must return a table', required or self.cfg.strict)
-			return false
+		if type(manifest) ~= 'table' then
+			fail('layer', manifestpath, manifestpath..' must return a table', required or ctx.cfg.strict)
+			return 0
 		end
-		if man.disabled == true or man.nativeonly == true and not self.target.native then return false end
 
 		local count = 0
-		if man.init then
-			if run(join(root, man.init), {
+		if manifest.init then
+			if run(root..'/'..manifest.init, {
 				layer = layer,
 				scope = scope,
 				kind = kind,
 				required = true
-			}) then count += 1 end
+			}) then
+				count += 1
+			end
 		end
-		for _, cat in ipairs(categories(man, path)) do
-			count += loadcat(root, cat, {
-				layer = layer,
-				scope = scope,
-				kind = kind
-			})
+
+		for _, category in ipairs(categories(manifest, manifestpath)) do
+			count += loadcategory(root, category, kind, layer, scope)
 		end
-		self.layers[#self.layers + 1] = {
+
+		ctx.layers[#ctx.layers + 1] = {
 			name = layer,
 			kind = kind,
 			root = root,
 			files = count
 		}
-		return true
+		return count
 	end
 
-	local function section(base, data, kind, layer, scope)
-		local val = data and data[kind]
-		if not val then return end
-		local root = type(val) == 'string' and join(base, val)
-			or type(val) == 'table' and join(base, val.root or val.path or kind)
-			or base..'/'..kind
-		ctx:loadroot(
-			root,
-			kind,
-			layer,
-			scope,
-			type(val) == 'table' and val.required == true,
-			type(val) == 'table' and val.manifest
+	local function repoinfo()
+		local base = tostring(ctx.loader.base or ctx.loader.requestbase or '')
+		local owner, repo, ref = base:match(
+			'^https://raw%.githubusercontent%.com/([^/]+)/([^/]+)/([^/]+)'
 		)
+		return owner, repo, ref
 	end
 
-	local function targetpart(base, data, layer, scope)
-		if data == true then data = {modules = true, patches = true} end
-		if type(data) ~= 'table' then data = {} end
-		if data.disabled == true then return end
+	local function repotree()
+		if tree ~= nil then return tree end
+		tree = false
 
-		if data.init then
-			local loaded = run(join(base, data.init), {
+		local owner, repo, ref = repoinfo()
+		if not owner or not repo or not ref then return false end
+
+		local url = 'https://api.github.com/repos/'..owner..'/'..repo
+			..'/git/trees/'..ref..'?recursive=1&vt='..tostring(os.clock())
+
+		local ok, raw = pcall(game.HttpGet, game, url, true)
+		if not ok or type(raw) ~= 'string' then return false end
+
+		local decoded, data = pcall(http.JSONDecode, http, raw)
+		if not decoded or type(data) ~= 'table' or type(data.tree) ~= 'table' then
+			return false
+		end
+
+		tree = {}
+		for _, entry in ipairs(data.tree) do
+			if entry.type == 'blob' and type(entry.path) == 'string' then
+				tree[#tree + 1] = entry.path
+			end
+		end
+		table.sort(tree)
+		return tree
+	end
+
+	local function autodiscover(root, kind, layer)
+		local listing = repotree()
+		if type(listing) ~= 'table' then return 0 end
+
+		local prefix = clean(root)..'/'
+		local files = {}
+		for _, path in ipairs(listing) do
+			local normalized = clean(path)
+			if normalized:sub(1, #prefix) == prefix
+				and normalized:sub(-4) == '.lua'
+				and normalized:sub(-13) ~= '/manifest.lua' then
+				local rel = normalized:sub(#prefix + 1)
+				local category = rel:match('^([^/]+)/')
+				if category and ctx.cats.names[category] then
+					files[#files + 1] = {
+						path = normalized,
+						category = category
+					}
+				end
+			end
+		end
+
+		local count = 0
+		for _, file in ipairs(files) do
+			if run(file.path, {
 				layer = layer,
-				scope = scope,
+				scope = 'place',
+				category = file.category,
+				kind = kind
+			}) then
+				count += 1
+			end
+		end
+
+		if count > 0 then
+			ctx.layers[#ctx.layers + 1] = {
+				name = layer,
+				kind = kind,
+				root = root,
+				files = count,
+				discovered = true
+			}
+		end
+		return count
+	end
+
+	local function loadplace(root, manifest)
+		if manifest.init then
+			run(root..'/'..manifest.init, {
+				layer = 'place:'..tostring(game.PlaceId),
+				scope = 'place',
 				kind = 'init',
 				required = true
 			})
-			if loaded then
-				ctx.layers[#ctx.layers + 1] = {
-					name = layer,
-					kind = 'init',
-					root = base,
-					files = 1
-				}
+		end
+
+		if manifest.modules ~= false then
+			local modulecount = autodiscover(
+				root..'/modules',
+				'modules',
+				'place:'..tostring(game.PlaceId)..':modules'
+			)
+			if modulecount == 0 then
+				loadmanifestroot(
+					root..'/modules',
+					'modules',
+					'place:'..tostring(game.PlaceId)..':modules',
+					'place',
+					false
+				)
 			end
 		end
-		section(base, data, 'modules', layer, scope)
-		section(base, data, 'patches', layer, scope)
-	end
 
-	local function readmanifest(root, quiet)
-		local path = root..'/manifest.lua'
-		local ok, man, state = ctx.loader:try(path)
-		if not ok then
-			if not quiet and state ~= 'missing' then fail('layer', path, man, ctx.cfg.strict) end
-			return nil
+		if manifest.patches ~= false then
+			local patchcount = autodiscover(
+				root..'/patches',
+				'patches',
+				'place:'..tostring(game.PlaceId)..':patches'
+			)
+			if patchcount == 0 then
+				loadmanifestroot(
+					root..'/patches',
+					'patches',
+					'place:'..tostring(game.PlaceId)..':patches',
+					'place',
+					false
+				)
+			end
 		end
-		if type(man) ~= 'table' then
-			fail('layer', path, path..' must return a table', ctx.cfg.strict)
-			return nil
-		end
-		return man
-	end
-
-	local function descriptor(root, data, layer, scope)
-		if type(data) == 'string' then
-			root = join('src/games', data)
-			data = nil
-		elseif type(data) == 'table' and (data.root or data.path) then
-			root = join('src/games', data.root or data.path)
-		end
-
-		local inline = type(data) == 'table' and (
-			data.modules ~= nil
-			or data.patches ~= nil
-			or data.init ~= nil
-			or data.exclude ~= nil
-			or data.excludes ~= nil
-			or data.remove ~= nil
-			or data.removes ~= nil
-			or data.disabled ~= nil
-		)
-		local man = inline and data or readmanifest(root, true)
-		if not man then return nil end
-		return {
-			root = root,
-			data = man,
-			layer = layer,
-			scope = scope
-		}
-	end
-
-	local function groupentry(base, group, id, layer, scope)
-		if group == true then
-			return descriptor(base..'/'..scope..'s/'..id, nil, layer, scope)
-		end
-		if type(group) ~= 'table' then return nil end
-		local value = group[id] or group[tonumber(id)]
-		if value == nil then return nil end
-		return descriptor(base..'/'..scope..'s/'..id, value, layer, scope)
-	end
-
-	local function registryentry(registry, key, id, layer, scope)
-		local group = type(registry) == 'table' and registry[key]
-		if type(group) ~= 'table' then return nil end
-		local value = group[id] or group[tonumber(id)]
-		if value == nil then return nil end
-		return descriptor('src/games/'..id, value, layer, scope)
-	end
-
-	local function addplan(item)
-		if not item then return end
-		for _, old in ipairs(planned) do
-			if old.root == item.root and old.scope == item.scope then return end
-		end
-		planned[#planned + 1] = item
-		collect(item.data)
 	end
 
 	local function applyremovals()
 		for name in pairs(removals) do
 			if ctx.mods[name] then
 				local ok = ctx:drop(name)
-				if not ok then fail('layer', name, 'failed to remove universal module '..name, ctx.cfg.strict) end
+				if not ok then
+					fail('layer', name, 'failed to remove universal module '..name, ctx.cfg.strict)
+				end
 			end
 		end
 	end
 
 	function ctx:loadlayers()
-		local gameid = tostring(self.target.gameid)
-		local buildid = tostring(self.target.buildid)
-		local placeid = tostring(self.target.placeid)
+		local placeid = tostring(self.target.placeid or game.PlaceId)
+		local gameroot = 'src/games/'..placeid
+		local manifestpath = gameroot..'/manifest.lua'
+		local supported, manifest, state = self.loader:try(manifestpath)
 
-		local registry = readmanifest('src/games', true)
-		addplan(registryentry(registry, 'universes', gameid, 'game:'..gameid, 'game'))
-		addplan(registryentry(registry, 'places', placeid, 'place:'..placeid, 'place'))
-
-		local legacyroot = 'src/games/'..gameid
-		local legacyman = readmanifest(legacyroot, true)
-		if legacyman then
-			addplan({
-				root = legacyroot,
-				data = legacyman,
-				layer = 'game:'..gameid,
-				scope = 'game'
-			})
-			addplan(groupentry(legacyroot, legacyman.builds, buildid, 'build:'..buildid, 'build'))
-			addplan(groupentry(legacyroot, legacyman.places, placeid, 'place:'..placeid, 'place'))
-		end
-
-		if not registryentry(registry, 'places', placeid, 'place:'..placeid, 'place') then
-			addplan(descriptor('src/games/'..placeid, nil, 'place:'..placeid, 'place'))
+		if supported then
+			if type(manifest) ~= 'table' then
+				fail('layer', manifestpath, manifestpath..' must return a table', self.cfg.strict)
+				manifest = {}
+			end
+			collect(manifest)
+		elseif state ~= 'missing' then
+			fail('layer', manifestpath, manifest, self.cfg.strict)
 		end
 
 		self.excluded = {
@@ -385,13 +371,27 @@ return function(ctx)
 			patches = table.clone(excluded.patches)
 		}
 		self.removals = table.clone(removals)
+		self.supportedgame = supported == true
+		self.gamefolder = supported and gameroot or nil
 
-		self:loadroot('src/modules', 'modules', 'universal:modules', 'universal', true)
-		self:loadroot('src/patches', 'patches', 'universal:patches', 'universal', true)
-		applyremovals()
+		loadmanifestroot(
+			'src/modules',
+			'modules',
+			'universal:modules',
+			'universal',
+			true
+		)
+		loadmanifestroot(
+			'src/patches',
+			'patches',
+			'universal:patches',
+			'universal',
+			true
+		)
 
-		for _, item in ipairs(planned) do
-			targetpart(item.root, item.data, item.layer, item.scope)
+		if supported then
+			applyremovals()
+			loadplace(gameroot, manifest)
 		end
 	end
 end
