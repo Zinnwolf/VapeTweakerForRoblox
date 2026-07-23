@@ -10,26 +10,6 @@ VapeTweaker loads in this order:
 Target manifests are inspected before universal files are executed. This allows
 a game to exclude incompatible universal files completely.
 
-## Recommended layout
-
-```text
-src/
-  games/
-    manifest.lua
-    xylex/
-      shared/
-        manifest.lua
-        modules/
-          world/
-            manifest.lua
-            example.lua
-      123456789 - game/
-        manifest.lua
-        modules/
-          combat/
-            manifest.lua
-            gamespecific.lua
-```
 
 `src/games/manifest.lua` maps Roblox IDs to friendly source folders:
 
