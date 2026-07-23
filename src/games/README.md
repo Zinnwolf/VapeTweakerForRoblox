@@ -36,7 +36,7 @@ return function(ctx)
 
     mod = ctx:module('world', {
         name = 'Example',
-        tooltip = 'Game-specific module.',
+        tooltip = 'aaa',
         func = function(enabled)
             if enabled then
                 -- implementation
