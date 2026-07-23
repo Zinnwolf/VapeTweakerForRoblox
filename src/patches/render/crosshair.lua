@@ -4,6 +4,8 @@ return function(ctx)
 		error('Crosshair requires the new Vape GUI overlay API', 0)
 	end
 
+	local run = game:GetService('RunService')
+
 	local iconpath = ctx.store:path('assets/crosshair.png')
 	local icon = 'rbxassetid://14368354234'
 	local present = false
@@ -172,16 +174,70 @@ return function(ctx)
 		end
 	end
 
-	local function center()
-		if not overlay or not overlay.Object then return end
+	local centerticket = 0
+	local centering = false
+
+	local function positionscale(obj)
+		local value = 1
+		local current = obj and obj.Parent
+		while current do
+			if current:IsA('GuiObject') then
+				for _, child in ipairs(current:GetChildren()) do
+					if child:IsA('UIScale') then
+						value *= child.Scale
+					end
+				end
+			end
+			current = current.Parent
+		end
+		return math.max(value, 0.01)
+	end
+
+	local function viewportcenter()
 		local camera = workspace.CurrentCamera
-		local viewport = camera and camera.ViewportSize or Vector2.new(1920, 1080)
-		local scale = vape.Scale and tonumber(vape.Scale.Value) or 1
-		scale = math.max(scale or 1, 0.01)
-		overlay.Object.Position = UDim2.fromOffset(
-			math.floor(viewport.X / (2 * scale) - 110),
-			math.floor(viewport.Y / (2 * scale))
-		)
+		local viewport = camera and camera.ViewportSize
+		if not viewport or viewport.X <= 0 or viewport.Y <= 0 then
+			viewport = Vector2.new(1920, 1080)
+		end
+		return viewport / 2
+	end
+
+	local function center()
+		if not overlay or not overlay.Object or not holder then return end
+		centerticket += 1
+		local ticket = centerticket
+
+		task.spawn(function()
+			centering = true
+			for _ = 1, 4 do
+				run.RenderStepped:Wait()
+				if ticket ~= centerticket
+					or not overlay
+					or not overlay.Object
+					or not overlay.Object.Parent
+					or not holder
+					or not holder.Parent then
+					centering = false
+					return
+				end
+
+				local rendered = holder.AbsolutePosition + (holder.AbsoluteSize / 2)
+				local delta = viewportcenter() - rendered
+				if math.abs(delta.X) <= 0.25 and math.abs(delta.Y) <= 0.25 then
+					break
+				end
+
+				local factor = positionscale(overlay.Object)
+				local position = overlay.Object.Position
+				overlay.Object.Position = UDim2.new(
+					position.X.Scale,
+					position.X.Offset + (delta.X / factor),
+					position.Y.Scale,
+					position.Y.Offset + (delta.Y / factor)
+				)
+			end
+			centering = false
+		end)
 	end
 
 	overlay = vape:CreateOverlay({
@@ -273,10 +329,40 @@ return function(ctx)
 		Function = draw
 	})
 
+	local centerlocked = false
 	overlay:CreateButton({
 		Name = 'Center Crosshair',
-		Function = center
+		Function = function()
+			centerlocked = true
+			center()
+		end
 	})
+
+	ctx:clean(overlay.Object:GetPropertyChangedSignal('Position'):Connect(function()
+		if not centering then centerlocked = false end
+	end))
+
+	local cameraconnection
+	local function watchcamera()
+		if cameraconnection then
+			cameraconnection:Disconnect()
+			cameraconnection = nil
+		end
+		local camera = workspace.CurrentCamera
+		if camera then
+			cameraconnection = camera:GetPropertyChangedSignal('ViewportSize'):Connect(function()
+				if centerlocked then center() end
+			end)
+		end
+	end
+	watchcamera()
+	ctx:clean(workspace:GetPropertyChangedSignal('CurrentCamera'):Connect(function()
+		watchcamera()
+		if centerlocked then center() end
+	end))
+	ctx:clean(function()
+		if cameraconnection then cameraconnection:Disconnect() end
+	end)
 
 	center()
 	if not overlay.Pinned then overlay:Pin() end
