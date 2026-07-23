@@ -1,4 +1,4 @@
-# Game-specific modules
+# Game specific modules
 
 VapeTweaker checks this exact path when it starts:
 
