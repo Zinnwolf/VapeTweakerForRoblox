@@ -1,12 +1,4 @@
--- SilentAim Ray.new fix.
---
--- Vape's Ray method hooks Ray.new globally. Camera, occlusion, shift-lock, and
--- control code can also construct Rays, so redirecting every constructor call
--- makes the camera react to the selected SilentAim target. This patch wraps the
--- internal Hooks.Ray transform itself and leaves the original Ray untouched
--- whenever the call is identified as camera/control work.
---
--- This does not modify workspace:Raycast or any other SilentAim method.
+--  a fix for ray methoid because it made my camera bug in fortblox
 
 return function(ctx)
 	local patch = ctx:patch('SilentAim', 'SilentAimfix', 'combat')
