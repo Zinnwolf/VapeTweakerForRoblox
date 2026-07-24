@@ -204,9 +204,6 @@ return function(ctx)
 		local focusPosition = camera.Focus.Position
 		local endpoint = origin + direction
 
-		-- The common camera-obstruction shapes are focus -> camera, camera ->
-		-- focus, and character root -> camera. These checks are intentionally
-		-- paired; a weapon ray merely starting at the camera is not rejected.
 		if length <= 256 then
 			if near(origin, focusPosition, 8) and near(endpoint, cameraPosition, 10) then return true end
 			if near(origin, cameraPosition, 8) and near(endpoint, focusPosition, 10) then return true end
@@ -218,8 +215,6 @@ return function(ctx)
 			end
 		end
 
-		-- Very short rays around the camera/focus are normally camera probes,
-		-- not weapon traces. Explicit Ray Weapon Scripts bypass this fallback.
 		if length <= 6 and (near(origin, cameraPosition, 6) or near(origin, focusPosition, 6)) then
 			return true
 		end
