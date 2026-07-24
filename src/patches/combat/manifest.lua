@@ -1,1 +1,5 @@
-return {files = {}}
+return {
+	files = {
+		'SilentAimfix.lua'
+	}
+}
